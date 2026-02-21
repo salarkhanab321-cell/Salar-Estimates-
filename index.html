@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Salar Local Brain</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-[#0d1117] text-slate-300 font-sans">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+
+    const App = () => {
+      const [memory, setMemory] = useState([]);
+      const [view, setView] = useState('processor');
+      const [searchQuery, setSearchQuery] = useState('');
+      const [processing, setProcessing] = useState(false);
+
+      useEffect(() => {
+        const savedData = localStorage.getItem('salar_brain_v2');
+        if (savedData) {
+          try { setMemory(JSON.parse(savedData)); } 
+          catch (e) { console.error("Failed to parse memory", e); }
+        }
+      }, []);
+
+      const updateMemory = (newData) => {
+        setMemory(newData);
+        localStorage.setItem('salar_brain_v2', JSON.stringify(newData));
+      };
+
+      const handleBulkUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          const rows = evt.target.result.split(/\r?\n/).filter(line => line.trim());
+          const newItems = rows.slice(1).map(row => {
+            const cells = row.split(',').map(c => c.trim());
+            return { id: crypto.randomUUID(), desc: cells[0] || 'Unknown Item', unit: cells[1] || 'EA', hours: parseFloat(cells[2]) || 0, cost: parseFloat(cells[3]) || 0, createdAt: new Date().toISOString() };
+          }).filter(item => item.desc !== 'Unknown Item');
+          updateMemory([...memory, ...newItems]);
+          alert(`Brain updated with ${newItems.length} new items.`);
+          e.target.value = '';
+        };
+        reader.readAsText(file);
+      };
+
+      const processEstimate = (e) => {
+        const file = e.target.files[0]; if (!file) return;
+        setProcessing(true);
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          const rows = evt.target.result.split(/\r?\n/).filter(line => line.trim());
+          const headers = rows[0].split(',').map(h => h.trim());
+          const descIdx = headers.findIndex(h => /item|desc/i.test(h));
+          const qtyIdx = headers.findIndex(h => /qty|quant/i.test(h));
+          const results = [["Item","Quantity","Matched Unit","Unit Cost","Unit Man Hours","Total Material Cost","Total Man Hours","Status"]];
+          rows.slice(1).forEach(row => {
+            const cells = row.split(',').map(c => c.trim());
+            const rowDesc = cells[descIdx] || "";
+            const rowQty = parseFloat(cells[qtyIdx]) || 1;
+            const match = memory.find(m => rowDesc.toLowerCase().includes(m.desc.toLowerCase()) || m.desc.toLowerCase().includes(rowDesc.toLowerCase()));
+            if (match) {
+              results.push([rowDesc,rowQty,match.unit,match.cost,match.hours,(match.cost*rowQty).toFixed(2),(match.hours*rowQty).toFixed(2),"MATCHED"]);
+            } else results.push([rowDesc,rowQty,"N/A",0,0,0,0,"MISSING"]);
+          });
+          downloadCSV(results, `Processed_${file.name}`);
+          setProcessing(false);
+          e.target.value = '';
+        };
+        reader.readAsText(file);
+      };
+
+      const downloadCSV = (data, filename) => {
+        const csvContent = data.map(e => e.join(",")).join("\n");
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.setAttribute("download", filename);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      };
+
+      const deleteItem = (id) => updateMemory(memory.filter(m => m.id !== id));
+      const filteredMemory = useMemo(() => !searchQuery ? memory : memory.filter(m => m.desc.toLowerCase().includes(searchQuery.toLowerCase())), [memory, searchQuery]);
+
+      const Card = ({ children, className="" }) => (
+        <div className={`bg-[#161b22] border border-slate-800 rounded-2xl p-6 ${className}`}>{children}</div>
+      );
+
+      return (
+        <div className="min-h-screen p-4 md:p-8">
+          <header className="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center mb-12 gap-6">
+            <div className="flex items-center gap-4">
+              <div className="bg-indigo-600 p-3 rounded-2xl shadow-lg shadow-indigo-500/20">
+                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                </svg>
+              </div>
+              <div>
+                <h1 className="text-2xl font-black text-white uppercase italic tracking-tighter">Salar Local Brain</h1>
+                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Offline Intelligence System</p>
+              </div>
+            </div>
+
+            <nav className="flex bg-[#161b22] p-1.5 rounded-xl border border-slate-800">
+              <button onClick={() => setView('processor')} className={`px-6 py-2 rounded-lg text-xs font-black uppercase transition-all ${view==='processor'?'bg-indigo-600 text-white shadow-lg':'text-slate-500 hover:text-slate-300'}`}>Processor</button>
+              <button onClick={() => setView('brain')} className={`px-6 py-2 rounded-lg text-xs font-black uppercase transition-all ${view==='brain'?'bg-indigo-600 text-white shadow-lg':'text-slate-500 hover:text-slate-300'}`}>Intelligence Bank</button>
+            </nav>
+          </header>
+
+          <main className="max-w-6xl mx-auto">
+            {view==='processor'?(
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <Card className="lg:col-span-2 border-l-4 border-l-indigo-500">
+                  <h2 className="text-white font-black uppercase text-sm mb-6 flex items-center gap-2">Instant Memory Lookup</h2>
+                  <div className="relative mb-6">
+                    <input type="text" placeholder="Search your brain for items..." className="w-full bg-[#0d1117] border border-slate-700 p-4 rounded-xl outline-none focus:border-indigo-500 transition-colors text-white" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} />
+                  </div>
+                  <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                    {filteredMemory.length>0?filteredMemory.map(item=>(
+                      <div key={item.id} className="bg-[#0d1117] p-4 rounded-xl border border-slate-800 flex justify-between items-center">
+                        <div><h4 className="text-white font-bold capitalize">{item.desc}</h4><p className="text-[10px] text-slate-500 uppercase font-black">{item.unit} • {item.hours} Unit Man Hours</p></div>
+                        <div className="text-right"><div className="text-emerald-400 font-black text-lg">${item.cost.toFixed(2)}</div></div>
+                      </div>
+                    )):<div className="text-center py-10 text-slate-600 font-bold uppercase text-xs border-2 border-dashed border-slate-800 rounded-2xl">No items found</div>}
+                  </div>
+                  <input type="file" id="estimateFile" className="hidden" accept=".csv" onChange={processEstimate} disabled={processing} />
+                  <label htmlFor="estimateFile" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-4 rounded-xl cursor-pointer transition-all uppercase tracking-widest text-xs shadow-lg shadow-indigo-600/20">{processing?"Calculating...":"Export Processed CSV"}</label>
+                </Card>
+              </div>
+            ):(
+              <div>Brain View (Import CSV to populate)</div>
+            )}
+          </main>
+
+          <style>{`
+            .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+            .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+            .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+            @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+            .animate-in { animation: fadeIn 0.4s ease-out forwards; }
+          `}</style>
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
